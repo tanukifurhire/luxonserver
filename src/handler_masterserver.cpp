@@ -361,6 +361,8 @@ Awaitable<> MasterServerHandler::HandleOperationRequest(ser::OperationRequestMes
             // Find game with given ID
             peer_->log->info("Finding game: {}", game_id);
             const auto& app_games = app.get_games();
+            peer_->log->info("Game lookup: id={} present={} entries={}", game_id,
+                             app_games.find(game_id) != app_games.end(), app_games.size());
 
             std::shared_ptr<Game> game;
             bool is_new = false;
@@ -390,10 +392,12 @@ Awaitable<> MasterServerHandler::HandleOperationRequest(ser::OperationRequestMes
                 is_new = true;
             } else {
                 game = res->second.lock();
+                peer_->log->info("Existing game lock: id={} alive={}", game_id, static_cast<bool>(game));
             }
 
             // Make sure game hasn't expired
             if (!game) {
+                peer_->log->warn("Game {} expired before JoinGame response", game_id);
                 const ser::OperationResponseMessage resp{.operation_code = OpCodes::Matchmaking::JoinGame,
                                                          .return_code = ErrorCodes::Core::InternalServerError,
                                                          .debug_message = "Game has expired"};
@@ -403,7 +407,10 @@ Awaitable<> MasterServerHandler::HandleOperationRequest(ser::OperationRequestMes
 
             // Validate join
             if (!is_new) {
+                peer_->log->info("Validating battle join: id={} created={} open={} peers={} expected={}",
+                                 game_id, game->is_created, game->is_open, game->peers.size(), game->expected_users.size());
                 const auto [join_validation_code, join_validation_message] = game->validate_join(peer_->persistent->user_id);
+                peer_->log->info("Battle join validation: id={} code={}", game_id, join_validation_code);
                 // Kick-Flight: both humans of a battle are told the room id at the same time (Stage 3), so the second
                 // one usually asks for it before the first has landed on the GameServer and `is_created` is still
                 // false. That is not a missing room, only a pending one: let the peer through, the GameServer
