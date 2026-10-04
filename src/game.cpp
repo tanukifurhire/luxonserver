@@ -346,10 +346,12 @@ std::pair<int16_t, std::string_view> Game::validate_join(const std::string& user
 
     // Return error if game is closed
     // Kick-Flight: the room master closes the room (IsOpen=false) within ~100 ms of creating it, before the other
-    // human has reached the GameServer, so whichever player is slower got "Game is closed" (2026-09-21). Everyone
-    // who belongs to a battle room was invited through the MasterServer and is on expected_users: keep the
-    // reserved slot valid for them even when the room is already closed.
-    if (!is_open && !(id.starts_with("battle-") && expected_users.contains(user_id)))
+    // human has reached the GameServer, so whichever player is slower got "Game is closed" (2026-09-21). The
+    // earlier expected_users-only exception was not enough (2026-10-05): the MasterServer validates the join *before* it
+    // adds the player to expected_users, so a late joiner is not on the list yet and was still rejected. Battle
+    // ids are only handed out by the API's matchmaking, so every joiner of a battle- room is legitimate: skip the
+    // closed check for them. The capacity check below still applies.
+    if (!is_open && !id.starts_with("battle-"))
         return {ErrorCodes::Matchmaking::GameClosed, "Game is closed"};
 
     // Check capacity (peers + expected users)

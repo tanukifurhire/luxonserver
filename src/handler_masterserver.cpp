@@ -479,8 +479,9 @@ Awaitable<> MasterServerHandler::HandleOperationRequest(ser::OperationRequestMes
                         const auto& app_games = app.get_games();
                         if (auto res = app_games.find(id); res != app_games.end()) {
                             if (auto game = res->second.lock()) {
-                                // Make sure game is joinable
-                                if (game->validate_join(peer_->persistent->user_id).first == ErrorCodes::Core::Ok) {
+                                // Make sure game is joinable. validate_join lets closed battle- rooms through for
+                                // explicit joins (late joiners); a random join must still never land in a closed room.
+                                if (game->is_open && game->validate_join(peer_->persistent->user_id).first == ErrorCodes::Core::Ok) {
                                     selected_game = game;
                                     break;
                                 }
@@ -508,7 +509,8 @@ Awaitable<> MasterServerHandler::HandleOperationRequest(ser::OperationRequestMes
                         continue;
 
                     // Make sure game is joinable  TODO: Pass expected user count too
-                    if (game->validate_join(peer_->persistent->user_id).first != ErrorCodes::Core::Ok)
+                    // Closed rooms are skipped explicitly: validate_join lets closed battle- rooms through for late joiners.
+                    if (!game->is_open || game->validate_join(peer_->persistent->user_id).first != ErrorCodes::Core::Ok)
                         continue;
 
                     // Property filter
