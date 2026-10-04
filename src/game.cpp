@@ -451,6 +451,42 @@ ser::Hashtable Game::get_lobby_game_props() const {
     fres[GameProps::IsOpen] = is_open;
     fres[GameProps::MaxPlayers] = max_peers;
 
+    // Photon only includes custom room properties in lobby/game-list results when
+    // the client lists those keys in CustomRoomPropertiesForLobby. The Kick Flight
+    // custom-room client populates CustomRoomProperties but leaves that list empty.
+    // Its browser therefore cannot see RoomCode/RoomName or the room metadata it
+    // uses to render and filter custom battles. Treat the known custom-room schema
+    // as the lobby list only for those rooms; explicit lobby_props remains authoritative.
+    if (lobby_props.empty() && custom_props.contains("RoomCode")) {
+        static constexpr const char* custom_room_lobby_keys[] = {
+            "ApplicationVersion",
+            "ApplicationMasterHash",
+            "ApplicationAssetRevisionList",
+            "RoomName",
+            "RoomCode",
+            "RoomRegion",
+            "RoomMasterPlayerName",
+            "RoomMasterRank",
+            "RoomMasterKickerId",
+            "RoomMasterModelId",
+            "RoomMasterHonorId",
+            "RoomMasterLanguageCode",
+            "RoomMasterFrameId",
+            "RoomIsJoinTeamBlue",
+            "RoomIsJoinTeamRed",
+            "RoomIsJoinTeamSpectator",
+            "RoomIsSecret",
+            "RoomBattleRuleType",
+            "RoomBattleRuleInfo",
+        };
+
+        for (const auto key : custom_room_lobby_keys) {
+            const std::string key_string{key};
+            if (auto it = custom_props.find(key_string); it != custom_props.end())
+                fres.emplace(key_string, it->second);
+        }
+    }
+
     for (const auto& key : lobby_props)
         if (custom_props.contains(key))
             fres.emplace(key, custom_props.at(key));
