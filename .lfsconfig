@@ -1,0 +1,4 @@
+[lfs]
+	# The fork network exceeded its GitHub LFS budget, so the only LFS object (a DJGPP DOS helper the server
+	# never uses) cannot be downloaded. Skip it so clones keep the pointer file and stay clean.
+	fetchexclude = WASMImpl/C/cwsdpmi.exe
