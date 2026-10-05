@@ -12,7 +12,9 @@
 #include "authentication.hpp"
 #include "server_manager.hpp"
 
+#include <format>
 #include <ranges>
+#include <string>
 #include <luxon/ser_interface.hpp>
 #include <luxon/common_codes.hpp>
 #include <tracy/Tracy.hpp>
@@ -43,6 +45,49 @@ using SetProperties =
 
 using ChangeInterestGroups = Model<Parameter<ser::ByteArray, RoutingAndEvents::Add, true>, Parameter<ser::ByteArray, RoutingAndEvents::Remove, true>>;
 } // namespace models
+
+namespace {
+// Compact one-line summary of an operation for the per-op info log: " actor=N" once joined, plus for SetProperties
+// " target=N bcast=0|1 props=[k1,k2,...]" (numeric keys are Photon well-known properties, quoted ones custom properties).
+std::string describe_operation(const ser::OperationRequestMessage& req, const GamePeer *game_peer) {
+    std::string out;
+    if (game_peer && game_peer->actor_id != 0)
+        out += std::format(" actor={}", game_peer->actor_id);
+
+    if (req.operation_code != OpCodes::Lite::SetProperties)
+        return out;
+
+    if (auto it = req.parameters.find(DictKeyCodes::GameAndActor::ActorNo); it != req.parameters.end())
+        if (const auto *target = it->second.get_ptr<int32_t>())
+            out += std::format(" target={}", *target);
+    if (auto it = req.parameters.find(DictKeyCodes::RoutingAndEvents::Broadcast); it != req.parameters.end())
+        if (const auto *broadcast = it->second.get_ptr<bool>())
+            out += std::format(" bcast={}", *broadcast ? 1 : 0);
+    if (auto it = req.parameters.find(DictKeyCodes::Properties::Properties); it != req.parameters.end()) {
+        if (const auto *props = it->second.get_ptr<ser::HashtablePtr>(); props && *props) {
+            constexpr size_t max_keys = 8;
+            size_t shown = 0;
+            out += " props=[";
+            for (const auto& key : **props | std::views::keys) {
+                if (shown == max_keys) {
+                    out += std::format(",+{}", (*props)->size() - max_keys);
+                    break;
+                }
+                if (shown++)
+                    out += ',';
+                if (const auto *byte_key = key.get_ptr<uint8_t>())
+                    out += std::format("{}", *byte_key);
+                else if (const auto *string_key = key.get_ptr<std::string>())
+                    out += std::format("\"{}\"", *string_key);
+                else
+                    out += '?';
+            }
+            out += ']';
+        }
+    }
+    return out;
+}
+} // namespace
 
 Awaitable<> GameServerHandler::HandleDisconnect() {
     ZoneScoped;
@@ -96,8 +141,11 @@ Awaitable<> GameServerHandler::HandleOperationRequest(ser::OperationRequestMessa
 
     // Kick-Flight debugging (2026-09-21): trace what each game peer sends so a client that stalls during loading can be
     // told apart from one that left on purpose. RaiseEvent is the hot path (position sync), so it is not logged.
+    // The sender's actor number and, for SetProperties (op 252), its target/broadcast/property keys are appended so the
+    // log tells which actor changed which property without a packet capture.
     if (req.operation_code != OpCodes::Lite::RaiseEvent)
-        peer_->log->info("op {} on channel {} ({} params)", static_cast<int>(req.operation_code), cmd_header.channel_id, req.parameters.size());
+        peer_->log->info("op {} on channel {} ({} params){}", static_cast<int>(req.operation_code), cmd_header.channel_id, req.parameters.size(),
+                         describe_operation(req, game_peer_));
 
     const auto ensure_is_master = [&]() {
         const bool is_master = game_peer_ && game_peer_->actor_id == current_game_->master_actor || current_game_->peers.size() == 0;
